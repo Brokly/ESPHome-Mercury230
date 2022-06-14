@@ -1,1 +1,284 @@
-szc
+
+# ИМЯ СЧЕТЧИКА
+substitutions:
+  devicename: mercury-230
+  upper_devicename: Mercury-230
+  low_devicename: mercury-230
+
+external_components:
+  - source:
+      type: local
+      path: my_components     
+    components: [ energy_meter_mercury230 ]
+    refresh: 0s
+
+esphome:
+  name: $devicename
+  includes:
+    - my_components/energy_meter_mercury230/energy_meter_mercury230.h
+    - my_components/energy_meter_mercury230/mercury230_proto.h
+
+esp32:
+  board: nodemcu-32s
+  framework:
+    type: arduino
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_pass
+  #manual_ip:
+    #static_ip: ${wifi_ip}
+    #gateway: !secret gateway 
+    #subnet: !secret subnet
+    #dns1: !secret dns1
+    #dns2: !secret dns2
+  ap:
+    ssid:  ${upper_devicename} Hotspot
+    password: !secret ap_wifi_pass
+
+captive_portal:
+
+debug:
+
+logger:
+  level: DEBUG
+  #baud_rate: 0
+
+api:
+#    password: !secret api_pass
+
+ota:
+    password: !secret ota_pass
+
+web_server:
+  port: 80
+  auth:
+    username: !secret web_user
+    password: !secret web_pass
+
+uart:
+  id: uart_bus
+  tx_pin: GPIO14
+  rx_pin: GPIO27
+  baud_rate: 9600
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+
+sensor:
+  # Напряжение по трем фазам
+  - platform: template
+    id: VoltA
+    name: ${upper_devicename} Volts A
+    icon: "mdi:alpha-v-circle-outline"
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    lambda: "return {};"
+    
+  - platform: template
+    id: VoltB
+    name: ${upper_devicename} Volts B
+    icon: "mdi:alpha-v-circle-outline"
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    lambda: "return {};"
+ 
+  - platform: template
+    id: VoltC
+    name: ${upper_devicename} Volts C
+    icon: "mdi:alpha-v-circle-outline"
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    lambda: "return {};"
+
+  # Ток общий
+  - platform: template
+    id: Amps
+    name: ${upper_devicename} Ampers Summ
+    device_class: power
+    icon: "mdi:current-ac"
+    unit_of_measurement: "A"
+    accuracy_decimals: 2
+    lambda: "return {};"
+
+  # Ток по трем фазам
+  - platform: template
+    id: AmpA
+    name: ${upper_devicename} Ampers A
+    device_class: power
+    icon: "mdi:current-ac"
+    unit_of_measurement: "A"
+    accuracy_decimals: 2
+    lambda: "return {};"
+
+  - platform: template
+    id: AmpB
+    name: ${upper_devicename} Ampers B
+    device_class: power
+    icon: "mdi:current-ac"
+    unit_of_measurement: "A"
+    accuracy_decimals: 2
+    lambda: "return {};"
+
+  - platform: template
+    id: AmpC
+    name: ${upper_devicename} Ampers C
+    device_class: power
+    icon: "mdi:current-ac"
+    unit_of_measurement: "A"
+    accuracy_decimals: 2
+    lambda: "return {};"
+
+  # Суммарная мощность 
+  - platform: template
+    id: Watts
+    name: ${upper_devicename} Watts Summ
+    device_class: energy
+    icon: "mdi:alpha-p-circle-outline"
+    unit_of_measurement: "W"
+    accuracy_decimals: 2
+    lambda: "return {};"
+
+  # Мощность по трем фазам
+  - platform: template
+    id: WattA
+    name: ${upper_devicename} Watts A
+    device_class: energy
+    icon: "mdi:alpha-p-circle-outline"
+    unit_of_measurement: "W"
+    accuracy_decimals: 2
+    lambda: "return {};"
+    
+  - platform: template
+    id: WattB
+    name: ${upper_devicename} Watts B
+    device_class: energy
+    icon: "mdi:alpha-p-circle-outline"
+    unit_of_measurement: "W"
+    accuracy_decimals: 2
+    lambda: "return {};"
+    
+  - platform: template
+    id: WattC
+    name: ${upper_devicename} Watts C
+    device_class: energy
+    icon: "mdi:alpha-p-circle-outline"
+    unit_of_measurement: "W"
+    accuracy_decimals: 2
+    lambda: "return {};"
+
+  # Коефициенты
+  - platform: template
+    id: RatioA
+    name: ${upper_devicename} Ratio A
+    icon: "mdi:alpha-r-circle-outline"
+    accuracy_decimals: 2
+    state_class: total_increasing
+    lambda: "return {};"
+
+  - platform: template
+    id: RatioB
+    name: ${upper_devicename} Ratio B
+    icon: "mdi:alpha-r-circle-outline"
+    accuracy_decimals: 2
+    state_class: total_increasing
+    lambda: "return {};"
+
+  - platform: template
+    id: RatioC
+    name: ${upper_devicename} Ratio C
+    icon: "mdi:alpha-r-circle-outline"
+    accuracy_decimals: 2
+    state_class: total_increasing
+    lambda: "return {};"
+
+  # Фазовые углы
+  - platform: template
+    id: AngleA
+    name: ${upper_devicename} Angle A
+    icon: "mdi:alpha"
+    unit_of_measurement: "deg"
+    accuracy_decimals: 2
+    state_class: total_increasing
+    lambda: "return {};"
+
+  - platform: template
+    id: AngleB
+    name: ${upper_devicename} Angle B
+    icon: "mdi:alpha"
+    unit_of_measurement: "deg"
+    accuracy_decimals: 2
+    state_class: total_increasing
+    lambda: "return {};"
+
+  - platform: template
+    id: AngleC
+    name: ${upper_devicename} Angle C
+    icon: "mdi:alpha"
+    unit_of_measurement: "deg"
+    accuracy_decimals: 2
+    lambda: "return {};"
+
+  # Показания
+  - platform: template
+    id: ValueA
+    name: ${upper_devicename} Value Active
+    icon: "mdi:counter"
+    unit_of_measurement: "kWh"
+    accuracy_decimals: 2
+    state_class: total_increasing
+    device_class: energy
+    lambda: "return {};"
+
+  - platform: template
+    id: ValueR
+    name: ${upper_devicename} Value Reactive
+    icon: "mdi:counter"
+    unit_of_measurement: "kWh"
+    accuracy_decimals: 2
+    state_class: total_increasing
+    device_class: energy
+    lambda: "return {};"
+
+  # Частота
+  - platform: template
+    id: Freq
+    name: ${upper_devicename} Frequency
+    icon: "mdi:sine-wave"
+    unit_of_measurement: "Hz"
+    accuracy_decimals: 2
+    lambda: "return {};"
+
+  - platform: wifi_signal
+    name: ${upper_devicename} WiFi Signal
+    update_interval: 30s
+    unit_of_measurement: "dBa"
+    accuracy_decimals: 0
+
+text_sensor:
+  - platform: template
+    name: ${upper_devicename} Version
+    id: ver_string
+    lambda: "return {};"
+
+  - platform: template
+    name: ${upper_devicename} Serial Number
+    id: sn_string
+    lambda: "return {};"
+
+  - platform: template
+    name: ${upper_devicename} Last Error
+    id: error_string
+    lambda: "return {};"
+    
+  - platform: template
+    name: ${upper_devicename} Date Fabricate
+    id: fab_string
+    lambda: "return {};"
+
+custom_component: 
+  - lambda: |-
+     auto my_mercury = new Mercury(id(uart_bus), id(VoltA), id(VoltB), id(VoltC), id(Amps), id(AmpA), id(AmpB), id(AmpC), id(Watts), id(WattA), id(WattB), id(WattC), id(RatioA), id(RatioB), id(RatioC), id(AngleA), id(AngleB), id(AngleC), id(Freq), id(ValueA), id(ValueR), id(ver_string), id(error_string), id(sn_string),  id(fab_string));
+     App.register_component(my_mercury);
+     return {my_mercury};
+    #update_interval: 5s
