@@ -289,6 +289,8 @@ class Mercury : public PollingComponent {
             pinMode(RED_LED_PIN,OUTPUT);
             digitalWrite(RED_LED_PIN,LOW);
             
+            esp_wifi_set_max_tx_power(80);
+            
             // установим функции обратного вызова, параметров которые хотим получать
             setCbPower(cbPower); // мощности
             setCbVolt(cbVolts);  // Вольты
@@ -307,7 +309,7 @@ class Mercury : public PollingComponent {
         }
 
         void loop() override {
-            
+
             // если подключен uart
             if(my_serial!=nullptr){
                 // если в буфере приема UART есть данные, значит счетчик что то прислал
@@ -366,16 +368,19 @@ class Mercury : public PollingComponent {
             static _replyReason oldError = ERROR_CORE_TIME; 
             if(oldError != getLastError()){ //если изменился статус ошибки
                 oldError = getLastError();  // запомним новый статус
-                if(error_string!=nullptr){ // публикация ошибок
-                    error_string->publish_state(getStrError(oldError));//   
-                }
+                //if(error_string!=nullptr){ // публикация ошибок
+                    //error_string->publish_state(getStrError(oldError));   
+                //}
                 if(oldError==REP_OK){
-                    _debugMsg(F("No errors !"), ESPHOME_LOG_LEVEL_WARN, __LINE__);
+                    _debugMsg(F("No errors !"), ESPHOME_LOG_LEVEL_INFO, __LINE__);
                     digitalWrite(RED_LED_PIN,LOW);
                 } else {
                     _debugMsg(F("Error: %s"), ESPHOME_LOG_LEVEL_ERROR, __LINE__, getStrError(oldError));
                     digitalWrite(RED_LED_PIN,HIGH);
                 }
+            }
+            if(error_string!=nullptr){ // публикация ошибок
+                error_string->publish_state(getStrError(oldError)); // что бы подтвердить доступность
             }
             
             static uint8_t counter=0;
@@ -457,14 +462,13 @@ class Mercury : public PollingComponent {
                     if(freqReady){ 
                         if(Freq!=nullptr) Freq->publish_state(_Fr); // опубликуем частоту
                         freqReady=false;
-                        break;
                     }
                     if(valuesReady){
                         if(ValueA!=nullptr) ValueA->publish_state(ValuesA);
                         if(ValueR!=nullptr) ValueR->publish_state(ValuesR);
                         valuesReady=false;
-                        break;
                     }
+                    break;
                 } 
                 counter++;
             }
