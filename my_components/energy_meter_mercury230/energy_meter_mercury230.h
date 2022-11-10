@@ -7,59 +7,101 @@
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/component.h"
-#include "esphome/components/uart/uart.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
-#include "mercury230_proto.h"
+#include "esphome/components/uart/uart.h"
 
-#define BLUE_LED_PIN 16  //GPIO16 
-#define RED_LED_PIN 4    //GPIO04
- 
-//namespace esphome {
-//namespace energy_meter_mercury230 {
+namespace esphome {
+namespace energy_meter_mercury230 {
+    
+using namespace esphome;
+using sensor::Sensor;    
+using text_sensor::TextSensor;    
+using uart::UARTDevice;  
+using uart::UARTComponent;
 
-// Буфера передачи данных колбэком (хотел как лучше, а вышло как всегда)    
-static float _Pa; 
-static float _Pb; 
-static float _Pc; 
-static float _Psumm;
-static bool powerReady=false;
+class Mercury : public Sensor, public PollingComponent  {
+    
+    //коды ошибок
+    enum _replyReason:uint8_t { REP_OK=0, //Все нормально
+                                ERROR_COMMAND=1, //Недопустимая команда или параметр
+                                ERROR_HARDWARE=2,//Внутренняя ошибка счетчика
+                                ERROR_ACCESS_LEVEL=3,//Недостаточен уровень для удовлетворения запроса
+                                ERROR_CORE_TIME=4, //Внутренние часы счетчика уже корректировались в течение текущих суток
+                                ERROR_CONNECTION=5, //Не открыт канал связи
+                                ERROR_TIMEOUT=6, //Ошибка ответа, ошибка КС
+                                BUFFER_OVERFLOW=7 // переполнениебуфера
+    };
 
-static float _Va; 
-static float _Vb; 
-static float _Vc; 
-static bool voltsReady=false;
+    //типы функций обратного вызова
+    typedef void (*callBack1_t)(float);
+    typedef void (*callBackStr_t)(char*);
+    typedef void (*callBack2_t)(float,float);
+    typedef void (*callBack3_t)(float,float,float);
+    typedef void (*callBack4_t)(float,float,float,float);
+    typedef void (*debug_t)(uint8_t, uint8_t*);
 
-static float _Ca; 
-static float _Cb; 
-static float _Cc; 
-static bool currentReady=false;
+    // типы пакетов по теме
+    enum _packetType:uint8_t { _OK=0,       // пакет проверки связи, используется только при тесте или пинге
+                           CONNECT=1,    // установка конекта
+                           CLOSE=2,      // закрытие конекта
+                           WRITE=3,      // запись
+                           READ=4,       // чтение параметров 
+                           LIST=5,       // чтение журналов
+                           READ_PARAMS=8 // чтение доп параметров 
+    };
 
-static float _Aa;
-static float _Ab;
-static float _Ac;
-static bool angleReady=false;
+    // тип пакета в буфере отправки
+    enum _currentSend:uint8_t { NONE=0, //в буфере нет пакета
+                            GET_TEST,
+                            GET_ACCESS,
+                            WRITE_TIME,
+                            CORE_TIME,
+                            GET_TIME,
+                            GET_POWER,
+                            GET_VOLTAGE,
+                            GET_CURRENT,
+                            GET_KOEF_POWER,
+                            GET_FREQ,
+                            GET_ANGLE_PH,
+                            GET_DISTORTION,
+                            GET_TEMP,
+                            GET_LINEAR_VOLTAGE,
+                            GET_VERS,
+                            GET_SER_NUM,
+                            GET_TIME_CODE,
+                            GET_CRC,
+                            GET_VALUE,
+                            GET_ADDR
+    };
 
-static float _Ra;
-static float _Rb;
-static float _Rc;
-static bool ratioReady=false;
+    // тип запроса чтения параметров
+    enum _reqType:uint8_t { PARAM_SER_NUM  = 0 ,    // серийный номер и дату
+                        PARAM_VERS     = 3,     // версия
+                        PARAM_UNO      = 0x11,  // читаем один конкретный параметр, НЕ БУДУ ИСПОЛЬЗОВАТЬ
+                        PARAM_ALL_FULL = 0x14,  // ответ по всем фазам, списком, без сокращения незначащих битов
+                        PARAM_ALL      = 0x16,  // ответ по всем фазам, списком, в сокращенном формате, при запросе указывать  фазу 1(!!!)
+                        PARAM_CRC      = 0x26   // читаем CRC прибора
+    };
 
-static float _Fr;
-static bool freqReady=false;
+    //================== ИСХОДЯЩИЕ ПАКЕТЫ ========================
 
-static float ValuesA;
-static float ValuesR;
-static bool valuesReady=false;
-
-uint8_t inPacket[32];
-uint8_t sizeInPacket=0;
-uint8_t outPacket[32];
-uint8_t sizeOutPacket=0;
-
-
-class Mercury : public PollingComponent {
+    // общий буфер отправки
+    struct _sBuff{
+        uint8_t addr; // адрес счетчика
+        _packetType packType; // тип пакета
+        uint8_t data[30]; // тело буфера
+    };
+    
     private:
+        // буфера работы с пакетами
+        uint8_t inPacket[32];
+        uint8_t sizeInPacket=0;
+        uint8_t outPacket[32];
+        uint8_t sizeOutPacket=0;
+    
+        #include "mercury230_proto.h"
+
         // указатель на UART, по которому общаемся с кондиционером
         UARTComponent *my_serial{nullptr};
         Sensor *VoltA {nullptr};
@@ -86,9 +128,23 @@ class Mercury : public PollingComponent {
         TextSensor *error_string {nullptr};
         TextSensor *sn_string {nullptr};
         TextSensor *fab_date_string {nullptr};
+        GPIOPin* led_active_pin{nullptr};
+        
+        //флаги обработок
+        bool cbPower=false;
+        bool cbVolt=false;
+        bool cbCurrent=false;
+        bool cbKoef=false;
+        bool cbAngles=false;
+        bool cbFreq=false;
+        bool cbValues=false;
+
+        // калбэки для отладки
+        bool debugIn=false;
+        bool debugOut=false;
+
         const uint32_t minUpdatePeriod = 2000;
         const char *const TAG = "Mercury";
-
 
         // вывод отладочной информации в лог
         // 
@@ -145,164 +201,103 @@ class Mercury : public PollingComponent {
             if (line == 0) line = __LINE__;
             _debugMsg(st, dbgLevel, line);
         }
-        
-        // функции обратного вызова, не удачно получилось :(
-        static void cbPower(float Psumm, float Pa, float Pb, float Pc){// будет вызвана при чтении из счетчика мощности
-            if(_Psumm!=Psumm){_Psumm=Psumm; powerReady=true;}
-            if(_Pa!=Pa){_Pa=Pa; powerReady=true;}
-            if(_Pb!=Pb){_Pb=Pb; powerReady=true;}
-            if(_Pc!=Pc){_Pc=Pc; powerReady=true;}
-            //_debugMsg(F("Get POWERS values"), ESPHOME_LOG_LEVEL_VERBOSE, __LINE__);
-        }
-        static void cbVolts(float Va, float Vb, float Vc){//  будет вызвана при чтении из счетчика напряжения
-            if(_Va!=Va){_Va=Va; voltsReady=true;}
-            if(_Vb!=Vb){_Vb=Vb; voltsReady=true;}
-            if(_Vc!=Vc){_Vc=Vc; voltsReady=true;}
-            //_debugMsg(F("Get VOLTS values"), ESPHOME_LOG_LEVEL_VERBOSE, __LINE__);
-        }
-        static void cbCurrent(float Ca, float Cb, float Cc){// будет вызвана при чтении из счетчика токов
-            if(_Ca!=Ca){_Ca=Ca; currentReady=true;}
-            if(_Cb!=Cb){_Cb=Cb; currentReady=true;}
-            if(_Cc!=Cc){_Cc=Cc; currentReady=true;}
-            //_debugMsg(F("Get CURRENTS values"), ESPHOME_LOG_LEVEL_VERBOSE, __LINE__);
-        }
-        static  void cbRatio(float Ra, float Rb, float Rc){// будет вызвана при чтении коэфициентов
-            if(_Ra!=Ra){_Ra=Ra; ratioReady=true;}
-            if(_Rb!=Rb){_Rb=Rb; ratioReady=true;}
-            if(_Rc!=Rc){_Rc=Rc; ratioReady=true;}
-            //_debugMsg(F("Get RATIOS values"), ESPHOME_LOG_LEVEL_VERBOSE, __LINE__);
-        }
-        static void cbAngles(float Aa, float Ab, float Ac){// будет вызвана при чтении фазовых сдвигов
-            if(_Aa!=Aa){_Aa=Aa; angleReady=true;}
-            if(_Ab!=Ab){_Ab=Ab; angleReady=true;}
-            if(_Ac!=Ac){_Ac=Ac; angleReady=true;}
-            //_debugMsg(F("Get PHASE ANGLES values"), ESPHOME_LOG_LEVEL_VERBOSE, __LINE__);
-        }
-        static void cbFreq(float Fr){// будет вызвана когда счетчик ответит на запрос о частоте
-            if(_Fr!=Fr){_Fr=Fr; freqReady=true;} 
-            //_debugMsg(F("Get FREQUENCY values"), ESPHOME_LOG_LEVEL_VERBOSE, __LINE__);
-        }
-        static void cbValues(float Aa, float Ar){// будет вызвана при получении показаний
-            if(ValuesA!=Aa){ValuesA=Aa; valuesReady=true;}
-            if(ValuesR!=Ar){ValuesR=Ar; valuesReady=true;}
-            //_debugMsg(F("Get VALUES values"), ESPHOME_LOG_LEVEL_VERBOSE, __LINE__);
-        }
-        // для трансляции принятого пакета
-        static void inDataReady(uint8_t size, uint8_t* buff){
-           memcpy(inPacket,buff,size);
-           sizeInPacket=size;
-        }
-        // для трансляции отправляемого пакета
-        static void outDataReady(uint8_t size, uint8_t* buff){
-           memcpy(outPacket,buff,size);
-           sizeOutPacket=size;
-        }
-
+     
 	public:
-        Mercury( UARTComponent *parent, 
-                        Sensor *sensor2, 
-                        Sensor *sensor3, 
-                        Sensor *sensor4, 
-                        Sensor *sensor5, 
-                        Sensor *sensor6, 
-                        Sensor *sensor7, 
-                        Sensor *sensor8, 
-                        Sensor *sensor9, 
-                        Sensor *sensor10, 
-                        Sensor *sensor11, 
-                        Sensor *sensor12, 
-                        Sensor *sensor13, 
-                        Sensor *sensor14, 
-                        Sensor *sensor15, 
-                        Sensor *sensor16, 
-                        Sensor *sensor17, 
-                        Sensor *sensor18, 
-                        Sensor *sensor19, 
-                        Sensor *sensor20, 
-                        Sensor *sensor21, 
-                        TextSensor *sensor22, 
-                        TextSensor *sensor23, 
-                        TextSensor *sensor24, 
-                        TextSensor *sensor25)   :       my_serial(parent) , 
-                                                        VoltA(sensor2) ,
-                                                        VoltB(sensor3) ,
-                                                        VoltC(sensor4) ,
-                                                        Amps(sensor5) , 
-                                                        AmpA(sensor6) , 
-                                                        AmpB(sensor7) , 
-                                                        AmpC(sensor8) , 
-                                                        Watts(sensor9), 
-                                                        WattA(sensor10), 
-                                                        WattB(sensor11), 
-                                                        WattC(sensor12), 
-                                                        RatioA(sensor13), 
-                                                        RatioB(sensor14), 
-                                                        RatioC(sensor15),
-                                                        AngleA(sensor16), 
-                                                        AngleB(sensor17), 
-                                                        AngleC(sensor18),
-                                                        Freq(sensor19), 
-                                                        ValueA(sensor20),
-                                                        ValueR(sensor21),
-                                                        vers_string(sensor22), 
-                                                        error_string(sensor23),
-                                                        sn_string(sensor24), 
-                                                        fab_date_string(sensor25){}
-      
+  
         // вывод в дебаг текущей конфигурации компонента
         void dump_config() {
             ESP_LOGCONFIG(TAG, "Mercury:");
-            LOG_SENSOR("", "Voltage phase A", this->VoltA);
-            LOG_SENSOR("", "Voltage phase B", this->VoltB);
-            LOG_SENSOR("", "Voltage phase C", this->VoltC);
-            LOG_SENSOR("", "Amperage Summ", this->Amps);
-            LOG_SENSOR("", "Amperage phase A", this->AmpA);
-            LOG_SENSOR("", "Amperage phase B", this->AmpB);
-            LOG_SENSOR("", "Amperage phase C", this->AmpC);
-            LOG_SENSOR("", "Watts All", this->Watts);
-            LOG_SENSOR("", "Watts phase A", this->WattA);
-            LOG_SENSOR("", "Watts phase B", this->WattB);
-            LOG_SENSOR("", "Watts phase C", this->WattC);
-            LOG_SENSOR("", "Ratio phase A", this->RatioA);
-            LOG_SENSOR("", "Ratio phase B", this->RatioB);
-            LOG_SENSOR("", "Ratio phase C", this->RatioC);
-            LOG_SENSOR("", "Phase shift AB", this->AngleA);
-            LOG_SENSOR("", "Phase shift BC", this->AngleB);
-            LOG_SENSOR("", "Phase shift CA", this->AngleC);
+            ESP_LOGCONFIG("", "UART Bus:");
+            ESP_LOGCONFIG("", "  RX Buffer Size: %u", my_serial->get_rx_buffer_size());
+            ESP_LOGCONFIG("", "  Baud Rate: %u baud", my_serial->get_baud_rate());
+            ESP_LOGCONFIG("", "  Data Bits: %u", my_serial->get_data_bits());
+            ESP_LOGCONFIG("", "  Parity: %s", LOG_STR_ARG(parity_to_str(my_serial->get_parity())));
+            ESP_LOGCONFIG("", "  Stop bits: %u", my_serial->get_stop_bits());
+            LOG_SENSOR("", "Voltage phase A ", this->VoltA);
+            LOG_SENSOR("", "Voltage phase B ", this->VoltB);
+            LOG_SENSOR("", "Voltage phase C ", this->VoltC);
+            LOG_SENSOR("", "Amperage Summ ", this->Amps);
+            LOG_SENSOR("", "Amperage phase A ", this->AmpA);
+            LOG_SENSOR("", "Amperage phase B ", this->AmpB);
+            LOG_SENSOR("", "Amperage phase C ", this->AmpC);
+            LOG_SENSOR("", "Watts All ", this->Watts);
+            LOG_SENSOR("", "Watts phase A ", this->WattA);
+            LOG_SENSOR("", "Watts phase B ", this->WattB);
+            LOG_SENSOR("", "Watts phase C ", this->WattC);
+            LOG_SENSOR("", "Ratio phase A ", this->RatioA);
+            LOG_SENSOR("", "Ratio phase B ", this->RatioB);
+            LOG_SENSOR("", "Ratio phase C ", this->RatioC);
+            LOG_SENSOR("", "Phase shift AB ", this->AngleA);
+            LOG_SENSOR("", "Phase shift BC ", this->AngleB);
+            LOG_SENSOR("", "Phase shift CA ", this->AngleC);
             LOG_SENSOR("", "Frequency", this->Freq);
-            LOG_SENSOR("", "Values Active+", this->ValueA);
-            LOG_SENSOR("", "Values Reactive+", this->ValueR);
-            LOG_TEXT_SENSOR("", "Date of Мanufacture", this->fab_date_string);
-            LOG_TEXT_SENSOR("", "Serial Number", this->sn_string);
-            LOG_TEXT_SENSOR("", "Version", this->vers_string);
-            LOG_TEXT_SENSOR("", "Last Error", this->error_string);
+            LOG_SENSOR("", "Values Active+ ", this->ValueA);
+            LOG_SENSOR("", "Values Reactive+ ", this->ValueR);
+            LOG_TEXT_SENSOR("", "Date of Мanufacture ", this->fab_date_string);
+            LOG_TEXT_SENSOR("", "Serial Number ", this->sn_string);
+            LOG_TEXT_SENSOR("", "Version ", this->vers_string);
+            LOG_TEXT_SENSOR("", "Last Error ", this->error_string);
+            LOG_PIN("Active pin ", this->led_active_pin);
         }
         
+        // подключение последовательного интерфейса
+        void initUart(UARTComponent *parent = nullptr){ my_serial=parent;}  
+        // подключение сенсоров и прочего
+        void set_VoltA(sensor::Sensor *sens) {this->VoltA=sens;}
+        void set_VoltB(sensor::Sensor *sens) {this->VoltB=sens;}
+        void set_VoltC(sensor::Sensor *sens) {this->VoltC=sens;}
+        void set_Amps(sensor::Sensor *sens) {this->Amps=sens;}
+        void set_AmpA(sensor::Sensor *sens) {this->AmpA=sens;}
+        void set_AmpB(sensor::Sensor *sens) {this->AmpB=sens;}
+        void set_AmpC(sensor::Sensor *sens) {this->AmpC=sens;}
+        void set_Watts(sensor::Sensor *sens) {this->Watts=sens;}
+        void set_WattA(sensor::Sensor *sens) {this->WattA=sens;}
+        void set_WattB(sensor::Sensor *sens) {this->WattB=sens;}
+        void set_WattC(sensor::Sensor *sens) {this->WattC=sens;}
+        void set_RatioA(sensor::Sensor *sens) {this->RatioA=sens;}
+        void set_RatioB(sensor::Sensor *sens) {this->RatioB=sens;}
+        void set_RatioC(sensor::Sensor *sens) {this->RatioC=sens;}
+        void set_AngleA(sensor::Sensor *sens) {this->AngleA=sens;}
+        void set_AngleB(sensor::Sensor *sens) {this->AngleB=sens;}
+        void set_AngleC(sensor::Sensor *sens) {this->AngleC=sens;}
+        void set_Freq(sensor::Sensor *sens) {this->Freq=sens;}
+        void set_ValueA(sensor::Sensor *sens) {this->ValueA=sens;}
+        void set_ValueR(sensor::Sensor *sens) {this->ValueR=sens;}
+        // версия
+        void set_vers_string(text_sensor::TextSensor *sens) { this->vers_string = sens;}
+        // ошибка
+        void set_error_string(text_sensor::TextSensor *sens) { this->error_string = sens;}
+        // серийный номер
+        void set_sn_string(text_sensor::TextSensor *sens) { this->sn_string = sens;}
+        // дата изготовления
+        void set_fab_date_string(text_sensor::TextSensor *sens) { this->fab_date_string = sens;}
+        // нога индикации работы
+        void set_active_pin(GPIOPin  *pin){ this->led_active_pin=pin; this->led_active_pin->setup();} 
+
         void setup() override {
              
             this->update_interval_=1000;
             
-            // ЖОСТКИЙ КОЛХОЗ, потом переделаю
-            // СВЕТОДИОДЫ, блин
-            pinMode(BLUE_LED_PIN,OUTPUT);
-            digitalWrite(BLUE_LED_PIN,LOW);
-            pinMode(RED_LED_PIN,OUTPUT);
-            digitalWrite(RED_LED_PIN,LOW);
+            // СВЕТОДИОД, синий встроенный, показывает активность на шине обмена
+            if(this->led_active_pin!=nullptr){
+               this->led_active_pin->pin_mode(gpio::FLAG_OUTPUT);
+               this->led_active_pin->digital_write(false); // опустить ногу :)
+            }
             
-            esp_wifi_set_max_tx_power(80);
+            // хочу мощный сигнал
+            //esp_wifi_set_max_tx_power(80);
             
             // установим функции обратного вызова, параметров которые хотим получать
-            setCbPower(cbPower); // мощности
-            setCbVolt(cbVolts);  // Вольты
-            setCbCurrent(cbCurrent); // Токи
-            setCbKoef(cbRatio); // Коэфициены
-            setCbAngles(cbAngles); // Межфазные углы
-            setCbFreq(cbFreq); // Частота
-            setCbValues(cbValues); // показания
-            
-            // отладочный коннектор, позволяет получить указатель на буфера пакетов в момент отправки/получения
-            setCbDebug(inDataReady, outDataReady); // будем печатать входящие и исходящие пакеты
-            //setCbDebug(inDataReady, nullptr); // будем печатать ТОЛЬКО входящие
+            cbPower=(this->Watts!=nullptr || this->WattA!=nullptr || this->WattB!=nullptr || WattC!=nullptr);
+            cbVolt=(this->VoltA!=nullptr || this->VoltB!=nullptr || this->VoltC!=nullptr);
+            cbCurrent=(this->Amps!=nullptr || this->AmpA!=nullptr || this->AmpB!=nullptr || AmpC!=nullptr);
+            cbKoef=(this->RatioA!=nullptr || this->RatioB!=nullptr || this->RatioC!=nullptr);
+            cbAngles=(this->AngleA!=nullptr || this->AngleB!=nullptr || this->AngleC!=nullptr);
+            cbFreq=(this->Freq!=nullptr);
+            cbValues=(this->ValueA!=nullptr || this->ValueR!=nullptr);
+            // включение отладки (TODO: увязать с флагом отладки)
+            debugIn=true;  // будем печатать входящие
+            debugOut=true; //  и исходящие пакеты
             
             // инициализация, адрес устройства 0 - поиск адреса
             setupMerc(0,minUpdatePeriod); // 
@@ -311,39 +306,36 @@ class Mercury : public PollingComponent {
         void loop() override {
 
             // если подключен uart
-            if(my_serial!=nullptr){
+            if(this->my_serial!=nullptr){
                 // если в буфере приема UART есть данные, значит счетчик что то прислал
-                if(my_serial->available()){
+                if(this->my_serial->available()){
                     uint8_t data;
-                    my_serial->read_byte(&data); // получили байт от счетчика
+                    this->my_serial->read_byte(&data); // получили байт от счетчика
                     getFromMerc(data); // передать байт в работу
-                    digitalWrite(BLUE_LED_PIN,LOW); // погасить диод
+                    if(this->led_active_pin!=nullptr){this->led_active_pin->digital_write(false);}
                 } 
-            }
-            
-            // если подключен uart
-            if(my_serial!=nullptr){
+
                 uint8_t data=availableMerc(); // количество байт для отправки
                 // если в буфере отправки есть данные - отправить счетчику
                 // счетчик очень капризен к даймаутам, отправлять нужно непрерывным потоком !!!
                 if(data){ 
-                   uint8_t* buff=getBuffForMerc();
-                   my_serial->write_array(buff,data);
-                   digitalWrite(BLUE_LED_PIN,HIGH); // зажечь диод
-                   //_debugPrintPacket(buff, data, false); 
-                   //return; // тут нельзя долго сидеть :(
+                    uint8_t* buff=getBuffForMerc();
+                    this->my_serial->write_array(buff,data);
+                    if(this->led_active_pin!=nullptr){this->led_active_pin->digital_write(true);}
+                    //_debugPrintPacket(buff, data, false); 
+                    //return; // тут нельзя долго сидеть :(
                 }
             }
             
             // если нужно печатаем в лог исходящий пакет
             if(sizeOutPacket){
-                _debugPrintPacket(outPacket, sizeOutPacket, false); 
+                this->_debugPrintPacket(outPacket, sizeOutPacket, false); 
                 sizeOutPacket=0;
             }
             
             // если нужно печатаем в лог входящий пакет
             if(sizeInPacket){
-                _debugPrintPacket(inPacket, sizeInPacket, true); 
+                this->_debugPrintPacket(inPacket, sizeInPacket, true); 
                 sizeInPacket=0;
             }
             
@@ -358,130 +350,28 @@ class Mercury : public PollingComponent {
                 if(upd_period < minUpdatePeriod){
                     upd_period = minUpdatePeriod;   
                 }
-                setUpdatePeriod(upd_period);
-                _debugMsg(F("Core scan period %u"), ESPHOME_LOG_LEVEL_ERROR, __LINE__, upd_period);               
+                this->setUpdatePeriod(upd_period);
+                this->_debugMsg(F("Core scan period %u"), ESPHOME_LOG_LEVEL_ERROR, __LINE__, upd_period);               
                 upd_period = this->update_interval_;
             }
-         
                     
             // контролируем ошибки связи и момент их возникновения
             static _replyReason oldError = ERROR_CORE_TIME; 
             if(oldError != getLastError()){ //если изменился статус ошибки
                 oldError = getLastError();  // запомним новый статус
-                //if(error_string!=nullptr){ // публикация ошибок
-                    //error_string->publish_state(getStrError(oldError));   
-                //}
+                if(this->error_string!=nullptr){ // публикация ошибок
+                    this->error_string->publish_state(getStrError(oldError));   
+                }
                 if(oldError==REP_OK){
                     _debugMsg(F("No errors !"), ESPHOME_LOG_LEVEL_INFO, __LINE__);
-                    digitalWrite(RED_LED_PIN,LOW);
                 } else {
                     _debugMsg(F("Error: %s"), ESPHOME_LOG_LEVEL_ERROR, __LINE__, getStrError(oldError));
-                    digitalWrite(RED_LED_PIN,HIGH);
                 }
-            }
-            if(error_string!=nullptr){ // публикация ошибок
-                error_string->publish_state(getStrError(oldError)); // что бы подтвердить доступность
             }
             
-            static uint8_t counter=0;
-            static uint8_t sendflg=0;
-            // из-за долгой публикации пришлось разнести ее по времени
-            while(counter<=8){
-
-                if(counter==0){
-                    if(readVersion()[0]!=0){ //версия прибора
-                        if(vers_string!=nullptr) {
-                            vers_string->publish_state(readVersion());
-                            _debugMsg(F("PUB VERSION values: %s"), ESPHOME_LOG_LEVEL_VERBOSE, __LINE__, readVersion());
-                            sendflg|=1;
-                            break;
-                        }
-                    }
-                } else if(counter==1){
-                    if(readSerial()[0]!=0){ //серийный номер
-                        if(sn_string!=nullptr) {
-                            sn_string->publish_state(readSerial());
-                            _debugMsg(F("PUB SERIAL NUM: %u"), ESPHOME_LOG_LEVEL_VERBOSE, __LINE__, readSerial());
-                            sendflg|=2;
-                            break;
-                        }
-                    }
-                } else if(counter==2){
-                    if(readFabData()[0]!=0){ //дата изготовления
-                        if(fab_date_string!=nullptr) {
-                            fab_date_string->publish_state(readFabData());
-                            _debugMsg(F("PUB FABRIC DATA: %u"), ESPHOME_LOG_LEVEL_VERBOSE, __LINE__, readFabData());
-                            sendflg|=4;
-                            break;
-                        }
-                    }
-                } else if(counter==3){
-                    // ПУБЛИКУЕМ ДАННЫЕ
-                    if(powerReady){
-                        if(WattA!=nullptr) WattA->publish_state(_Pa); // публикуем мощности
-                        if(WattB!=nullptr) WattB->publish_state(_Pb);
-                        if(WattC!=nullptr) WattC->publish_state(_Pc);
-                        if(Watts!=nullptr) Watts->publish_state(_Psumm);
-                        powerReady=false;
-                        break;
-                    }
-                } else if(counter==4){
-                    if(voltsReady){
-                        if(VoltA!=nullptr) VoltA->publish_state(_Va); // публикуем напряжения
-                        if(VoltB!=nullptr) VoltB->publish_state(_Vb);
-                        if(VoltC!=nullptr) VoltC->publish_state(_Vc);
-                        voltsReady=false;
-                        break;
-                    }
-                } else if(counter==5){
-                    if(currentReady){
-                        if(Amps!=nullptr) Amps->publish_state(_Ca+_Cb+_Cc); 
-                        if(AmpA!=nullptr) AmpA->publish_state(_Ca);
-                        if(AmpB!=nullptr) AmpB->publish_state(_Cb);
-                        if(AmpC!=nullptr) AmpC->publish_state(_Cc);
-                        currentReady=false;
-                        break;
-                    }
-                } else if(counter==6){
-                    if(ratioReady){
-                        if(RatioA!=nullptr) RatioA->publish_state(_Ra);
-                        if(RatioB!=nullptr) RatioB->publish_state(_Rb);
-                        if(RatioC!=nullptr) RatioC->publish_state(_Rc);
-                        ratioReady=false;
-                        break;
-                    }
-                } else if(counter==7){
-                    if(angleReady){
-                        if(AngleA!=nullptr) AngleA->publish_state(_Aa);
-                        if(AngleB!=nullptr) AngleB->publish_state(_Ab);
-                        if(AngleC!=nullptr) AngleC->publish_state(_Ac);
-                        angleReady=false;
-                        break;
-                    }
-                } else if(counter==8){
-                    if(freqReady){ 
-                        if(Freq!=nullptr) Freq->publish_state(_Fr); // опубликуем частоту
-                        freqReady=false;
-                    }
-                    if(valuesReady){
-                        if(ValueA!=nullptr) ValueA->publish_state(ValuesA);
-                        if(ValueR!=nullptr) ValueR->publish_state(ValuesR);
-                        valuesReady=false;
-                    }
-                    break;
-                } 
-                counter++;
-            }
-            if(counter++>8) {
-                if(sendflg!=7){
-                    counter=0;
-                } else {
-                    counter=3;
-                }
-            }
         }
 
 };
 
-//} // namespace energy_meter_mercury230
-//} // namespace esphome  
+} // namespace energy_meter_mercury230
+} // namespace esphome  

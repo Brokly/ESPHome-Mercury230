@@ -1,6 +1,288 @@
-import esphome.codegen as cg
+#import logging
 import esphome.config_validation as cv
-from esphome.components import uart, sensor
-from esphome.const import (CONF_ID, CONF_UPDATE_INTERVAL, ICON_CHEMICAL_WEAPON)
+import esphome.codegen as cg
+from esphome import automation, pins
+from esphome.components import sensor, text_sensor, uart
+from esphome.automation import maybe_simple_id
+from esphome.const import (
+    CONF_ID,
+    CONF_PIN,
+    CONF_UART_ID,
+    CONF_CURRENT,
+    CONF_DATA,
+    STATE_CLASS_MEASUREMENT,
+    CONF_VALUE,
+    CONF_MAX_VALUE,
+    CONF_MIN_VALUE,
+    CONF_STEP,
+    CONF_UNIT_OF_MEASUREMENT,
+    CONF_ACCURACY_DECIMALS,
+    CONF_FREQUENCY,
+    #DEVICE_CLASS_FREQUENCY,
+    UNIT_HERTZ,
+    CONF_VOLTAGE,
+    DEVICE_CLASS_VOLTAGE,
+    UNIT_VOLT,
+    CONF_PHASE_ANGLE,
+    UNIT_DEGREES,
+    CONF_CURRENT,
+    DEVICE_CLASS_CURRENT,
+    UNIT_AMPERE,
+    #ICON_CURRENT_AC,
+    CONF_POWER,
+    DEVICE_CLASS_POWER,
+    UNIT_WATT,
+    #ICON_POWER,
+    UNIT_EMPTY,
+    CONF_POWER_FACTOR,
+    DEVICE_CLASS_POWER_FACTOR,
+    CONF_IMPORT_ACTIVE_ENERGY,
+    CONF_IMPORT_REACTIVE_ENERGY,
+    UNIT_KILOWATT_HOURS,
+    STATE_CLASS_TOTAL_INCREASING,
+    DEVICE_CLASS_ENERGY,
+)
 
-DEPENDENCIES = ['uart']
+#_LOGGER = logging.getLogger(__name__)
+
+CODEOWNERS = ["@Brokly"]
+DEPENDENCIES = ["sensor", "text_sensor", "uart"]
+AUTO_LOAD = ["output"]
+
+CONF_ACTIVE_LED_PIN = "active_led_pin"
+CONF_FIRM_VERSION = "firmware_version"
+ICON_FIRM_VERSION = "mdi:select-inverse"
+CONF_SERIAL_NUMBER = "serial_number"
+ICON_SERIAL_NUMBER = "mdi:numeric"
+CONF_CONNECT_STATUS = "connect_status"
+ICON_CONNECT_STATUS = "mdi:lan-disconnect"
+CONF_DATA_FABRICATE = "date_fabricate"
+ICON_DATA_FABRICATE = "mdi:factory"
+ICON_PHASE_ANGLE = "mdi:alpha"
+#ICON_RATIO = "mdi:alpha-r-circle-outline"
+ICON_FREQUENCY = "mdi:sine-wave"
+
+SUMM = "_summ"
+PhA = "_a"
+PhB = "_b"
+PhC = "_c"
+
+Mercury230_ns = cg.esphome_ns.namespace("energy_meter_mercury230")
+Mercury230 = Mercury230_ns.class_("Mercury", sensor.Sensor, cg.Component)
+
+def output_info(config):
+    #_LOGGER.info(config)
+    return config
+    
+#шаблон сенсора напряжений
+voltSensor=sensor.sensor_schema(
+        state_class=STATE_CLASS_MEASUREMENT,
+        device_class=DEVICE_CLASS_VOLTAGE,
+        unit_of_measurement=UNIT_VOLT,
+        #icon=???,
+        accuracy_decimals=2,
+    )
+#шаблон сенсора мощности
+powerSensor=sensor.sensor_schema(
+        state_class=STATE_CLASS_MEASUREMENT,
+        device_class=DEVICE_CLASS_POWER,
+        unit_of_measurement=UNIT_VOLT,
+        #icon=ICON_POWER,
+        accuracy_decimals=2,
+    )
+#шаблон сенсора тока
+currentSensor=sensor.sensor_schema(
+        state_class=STATE_CLASS_MEASUREMENT,
+        device_class=DEVICE_CLASS_CURRENT,
+        unit_of_measurement=UNIT_AMPERE,
+        #icon=ICON_CURRENT_AC,
+        accuracy_decimals=2,
+    )
+#шаблон сенсора углов
+angleSensor=sensor.sensor_schema(
+        state_class=STATE_CLASS_MEASUREMENT,
+        unit_of_measurement=UNIT_DEGREES,
+        icon=ICON_PHASE_ANGLE,
+        accuracy_decimals=2,
+    )
+#шаблон сенсора коефициентов
+ratioSensor=sensor.sensor_schema(
+        state_class=STATE_CLASS_MEASUREMENT,
+        device_class=DEVICE_CLASS_POWER_FACTOR,
+        unit_of_measurement=UNIT_EMPTY,
+        #icon=ICON_RATIO,
+        accuracy_decimals=2,
+    )
+
+initParams = {
+     cv.GenerateID(): cv.declare_id(Mercury230),
+     # частота
+     cv.Optional(CONF_FREQUENCY): sensor.sensor_schema(
+        unit_of_measurement=UNIT_HERTZ,
+        accuracy_decimals=1,
+        #device_class=DEVICE_CLASS_FREQUENCY,
+        state_class=STATE_CLASS_MEASUREMENT,
+        icon=ICON_FREQUENCY,
+     ),
+     # активная энергия
+     cv.Optional(CONF_IMPORT_ACTIVE_ENERGY): sensor.sensor_schema(
+        unit_of_measurement=UNIT_KILOWATT_HOURS,
+        accuracy_decimals=2,
+        device_class=DEVICE_CLASS_ENERGY,
+        state_class=STATE_CLASS_TOTAL_INCREASING,
+     ),
+     # реактивная энергия
+     cv.Optional(CONF_IMPORT_REACTIVE_ENERGY): sensor.sensor_schema(
+        unit_of_measurement=UNIT_KILOWATT_HOURS,
+        accuracy_decimals=2,
+        device_class=DEVICE_CLASS_ENERGY,
+        state_class=STATE_CLASS_TOTAL_INCREASING,
+     ),
+     # версия прошивки устройства
+     cv.Optional(CONF_FIRM_VERSION): text_sensor.text_sensor_schema(
+        icon=ICON_FIRM_VERSION,
+     ),
+     # серийник устройства
+     cv.Optional(CONF_SERIAL_NUMBER): text_sensor.text_sensor_schema(
+        icon=ICON_SERIAL_NUMBER,
+     ),
+     # статус соединения 
+     cv.Optional(CONF_CONNECT_STATUS): text_sensor.text_sensor_schema(
+        icon=ICON_CONNECT_STATUS,
+     ),
+     # дата изготовления
+     cv.Optional(CONF_DATA_FABRICATE): text_sensor.text_sensor_schema(
+        icon=ICON_DATA_FABRICATE,
+     ),
+     # нога светодиода индикации связи
+     cv.Optional(CONF_ACTIVE_LED_PIN ): pins.gpio_output_pin_schema,
+}
+
+# вольты
+initParams[cv.Optional(CONF_VOLTAGE+PhA)] = voltSensor;
+initParams[cv.Optional(CONF_VOLTAGE+PhB)] = voltSensor;
+initParams[cv.Optional(CONF_VOLTAGE+PhC)] = voltSensor;
+# мощности
+initParams[cv.Optional(CONF_POWER+PhA)] = powerSensor;
+initParams[cv.Optional(CONF_POWER+PhB)] = powerSensor;
+initParams[cv.Optional(CONF_POWER+PhC)] = powerSensor;
+initParams[cv.Optional(CONF_POWER+SUMM)] = powerSensor;
+# токи
+initParams[cv.Optional(CONF_CURRENT+PhA)] = currentSensor;
+initParams[cv.Optional(CONF_CURRENT+PhB)] = currentSensor;
+initParams[cv.Optional(CONF_CURRENT+PhC)] = currentSensor;
+initParams[cv.Optional(CONF_CURRENT+SUMM)] = currentSensor;
+# углы
+initParams[cv.Optional(CONF_PHASE_ANGLE+PhA)] = angleSensor;
+initParams[cv.Optional(CONF_PHASE_ANGLE+PhB)] = angleSensor;
+initParams[cv.Optional(CONF_PHASE_ANGLE+PhC)] = angleSensor;
+# коэфициенты
+initParams[cv.Optional(CONF_POWER_FACTOR+PhA)] = ratioSensor;
+initParams[cv.Optional(CONF_POWER_FACTOR+PhB)] = ratioSensor;
+initParams[cv.Optional(CONF_POWER_FACTOR+PhC)] = ratioSensor;
+
+CONFIG_SCHEMA = cv.All(sensor.SENSOR_SCHEMA.extend(initParams).extend(uart.UART_DEVICE_SCHEMA).extend(cv.COMPONENT_SCHEMA), output_info)
+
+async def to_code(config):
+    #_LOGGER.info("--------------")
+    #_LOGGER.info(config)
+    var = cg.new_Pvariable(config[CONF_ID])
+    await cg.register_component(var, config)
+    #uart 
+    parent = await cg.get_variable(config[CONF_UART_ID])
+    cg.add(var.initUart(parent))
+    # прошивка
+    if (CONF_FIRM_VERSION) in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_FIRM_VERSION])
+        cg.add(var.set_vers_string(sens))
+    # connect status
+    if (CONF_CONNECT_STATUS) in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_CONNECT_STATUS])
+        cg.add(var.set_error_string(sens))
+    # дата изготовления
+    if (CONF_DATA_FABRICATE) in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_DATA_FABRICATE])
+        cg.add(var.set_fab_date_string(sens))
+    # серийник устройства
+    if (CONF_SERIAL_NUMBER) in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_SERIAL_NUMBER])
+        cg.add(var.set_sn_string(sens))
+    #нога светодиода сигнализации
+    if (CONF_ACTIVE_LED_PIN ) in config:
+        pin = await cg.gpio_pin_expression(config[CONF_ACTIVE_LED_PIN])
+        cg.add(var.set_active_pin(pin))
+    # частота
+    if (CONF_FREQUENCY) in config:
+        sens = await sensor.new_sensor(config[CONF_FREQUENCY])
+        cg.add(var.set_Freq(sens))
+    # активная энергия
+    if (CONF_IMPORT_ACTIVE_ENERGY) in config:
+        sens = await sensor.new_sensor(config[CONF_IMPORT_ACTIVE_ENERGY])
+        cg.add(var.set_ValueA(sens))
+    # реактивная энергия
+    if (CONF_IMPORT_REACTIVE_ENERGY) in config:
+        sens = await sensor.new_sensor(config[CONF_IMPORT_REACTIVE_ENERGY])
+        cg.add(var.set_ValueR(sens))
+    # вольты
+    if (CONF_VOLTAGE+PhA) in config:
+        sens = await sensor.new_sensor(config[CONF_VOLTAGE+PhA])
+        cg.add(var.set_VoltA(sens))
+    if (CONF_VOLTAGE+PhB) in config:
+        sens = await sensor.new_sensor(config[CONF_VOLTAGE+PhB])
+        cg.add(var.set_VoltB(sens))
+    if (CONF_VOLTAGE+PhC) in config:
+        sens = await sensor.new_sensor(config[CONF_VOLTAGE+PhC])
+        cg.add(var.set_VoltC(sens))
+    # мощности
+    if (CONF_POWER+PhA) in config:
+        sens = await sensor.new_sensor(config[CONF_POWER+PhA])
+        cg.add(var.set_WattA(sens))
+    if (CONF_POWER+PhB) in config:
+        sens = await sensor.new_sensor(config[CONF_POWER+PhB])
+        cg.add(var.set_WattB(sens))
+    if (CONF_POWER+PhC) in config:
+        sens = await sensor.new_sensor(config[CONF_POWER+PhC])
+        cg.add(var.set_WattC(sens))
+    if (CONF_POWER+SUMM) in config:
+        sens = await sensor.new_sensor(config[CONF_POWER+SUMM])
+        cg.add(var.set_Watts(sens))
+    # токи
+    if (CONF_CURRENT+PhA) in config:
+        sens = await sensor.new_sensor(config[CONF_CURRENT+PhA])
+        cg.add(var.set_AmpA(sens))
+    if (CONF_CURRENT+PhB) in config:
+        sens = await sensor.new_sensor(config[CONF_CURRENT+PhB])
+        cg.add(var.set_AmpB(sens))
+    if (CONF_CURRENT+PhC) in config:
+        sens = await sensor.new_sensor(config[CONF_CURRENT+PhC])
+        cg.add(var.set_AmpC(sens))
+    if (CONF_CURRENT+SUMM) in config:
+        sens = await sensor.new_sensor(config[CONF_CURRENT+SUMM])
+        cg.add(var.set_Amps(sens))
+    # углы
+    if (CONF_PHASE_ANGLE+PhA) in config:
+        sens = await sensor.new_sensor(config[CONF_PHASE_ANGLE+PhA])
+        cg.add(var.set_AngleA(sens))
+    if (CONF_PHASE_ANGLE+PhB) in config:
+        sens = await sensor.new_sensor(config[CONF_PHASE_ANGLE+PhB])
+        cg.add(var.set_AngleB(sens))
+    if (CONF_PHASE_ANGLE+PhC) in config:
+        sens = await sensor.new_sensor(config[CONF_PHASE_ANGLE+PhC])
+        cg.add(var.set_AngleC(sens))
+    # коэфициенты
+    if (CONF_POWER_FACTOR+PhA) in config:
+        sens = await sensor.new_sensor(config[CONF_POWER_FACTOR+PhA])
+        cg.add(var.set_RatioA(sens))
+    if (CONF_POWER_FACTOR+PhB) in config:
+        sens = await sensor.new_sensor(config[CONF_POWER_FACTOR+PhB])
+        cg.add(var.set_RatioB(sens))
+    if (CONF_POWER_FACTOR+PhC) in config:
+        sens = await sensor.new_sensor(config[CONF_POWER_FACTOR+PhC])
+        cg.add(var.set_RatioC(sens))
+
+
+
+
+
+
+
