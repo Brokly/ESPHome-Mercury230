@@ -99,6 +99,11 @@ class Mercury : public Sensor, public PollingComponent  {
         uint8_t sizeInPacket=0;
         uint8_t outPacket[32];
         uint8_t sizeOutPacket=0;
+        std::string pass=""; // буфер пароля для подключения к счетчику
+        bool act_pass=false;       // пароль указан пользователем
+        bool pas_in_hex=false;     // ПАРОЛЬ в виде HEX
+        bool admin=false;          // тип доступа
+        uint8_t addr=0;           // адрес счетчика
     
         #include "mercury230_proto.h"
 
@@ -129,7 +134,6 @@ class Mercury : public Sensor, public PollingComponent  {
         TextSensor *sn_string {nullptr};
         TextSensor *fab_date_string {nullptr};
         GPIOPin* led_active_pin{nullptr};
-        
         //флаги обработок
         bool cbPower=false;
         bool cbVolt=false;
@@ -143,7 +147,7 @@ class Mercury : public Sensor, public PollingComponent  {
         bool debugIn=false;
         bool debugOut=false;
 
-        const uint32_t minUpdatePeriod = 2000;
+        const uint32_t minUpdatePeriod = 5000;
         const char *const TAG = "Mercury";
 
         // вывод отладочной информации в лог
@@ -201,18 +205,20 @@ class Mercury : public Sensor, public PollingComponent  {
             if (line == 0) line = __LINE__;
             _debugMsg(st, dbgLevel, line);
         }
-     
+        
+
 	public:
   
         // вывод в дебаг текущей конфигурации компонента
         void dump_config() {
             ESP_LOGCONFIG(TAG, "Mercury:");
-            ESP_LOGCONFIG("", "UART Bus:");
-            ESP_LOGCONFIG("", "  RX Buffer Size: %u", my_serial->get_rx_buffer_size());
-            ESP_LOGCONFIG("", "  Baud Rate: %u baud", my_serial->get_baud_rate());
-            ESP_LOGCONFIG("", "  Data Bits: %u", my_serial->get_data_bits());
-            ESP_LOGCONFIG("", "  Parity: %s", LOG_STR_ARG(parity_to_str(my_serial->get_parity())));
-            ESP_LOGCONFIG("", "  Stop bits: %u", my_serial->get_stop_bits());
+            ESP_LOGCONFIG(TAG, "UART Bus:");
+            ESP_LOGCONFIG(TAG, "  RX Buffer Size: %u", my_serial->get_rx_buffer_size());
+            ESP_LOGCONFIG(TAG, "  Baud Rate: %u baud", my_serial->get_baud_rate());
+            ESP_LOGCONFIG(TAG, "  Data Bits: %u", my_serial->get_data_bits());
+            ESP_LOGCONFIG(TAG, "  Parity: %s", LOG_STR_ARG(parity_to_str(my_serial->get_parity())));
+            ESP_LOGCONFIG(TAG, "  Stop bits: %u", my_serial->get_stop_bits());
+            ESP_LOGCONFIG(TAG, "  Update interval: %u sec", (this->update_interval_/1000));
             LOG_SENSOR("", "Voltage phase A ", this->VoltA);
             LOG_SENSOR("", "Voltage phase B ", this->VoltB);
             LOG_SENSOR("", "Voltage phase C ", this->VoltC);
@@ -238,6 +244,30 @@ class Mercury : public Sensor, public PollingComponent  {
             LOG_TEXT_SENSOR("", "Version ", this->vers_string);
             LOG_TEXT_SENSOR("", "Last Error ", this->error_string);
             LOG_PIN("Active pin ", this->led_active_pin);
+            // параметры предустановленные пользователем
+            if(addr){
+                ESP_LOGCONFIG(TAG,"Device address: %02u", addr);
+            }
+            uint8_t buff[6]={0};
+            if(act_pass){
+                if(pas_in_hex){
+                    if(!getPass(buff)){
+                       ESP_LOGE(TAG, "Password wrong");
+                       act_pass=false;
+                    }
+                }
+            }
+            if(act_pass){
+                if(pas_in_hex){
+                    ESP_LOGCONFIG(TAG, "Password in HEX");
+                } else {
+                    ESP_LOGCONFIG(TAG, "Password in ASCII");
+                }
+                ESP_LOGCONFIG("", "Password for send: %X,%X,%X,%X,%X,%X",buff[0],buff[1],buff[2],buff[3],buff[4],buff[5]);   
+            }   
+            if(admin){
+                ESP_LOGCONFIG("", "Access level: ADMIN (highly not recommended)");
+            }
         }
         
         // подключение последовательного интерфейса
@@ -273,10 +303,22 @@ class Mercury : public Sensor, public PollingComponent  {
         void set_fab_date_string(text_sensor::TextSensor *sens) { this->fab_date_string = sens;}
         // нога индикации работы
         void set_active_pin(GPIOPin  *pin){ this->led_active_pin=pin; this->led_active_pin->setup();} 
+        // пароль для подключения к счетчику
+        void set_pass(const std::string &pass){this->pass=pass; act_pass=true;}
+        // вид пароля (HEX ли ASCII) 
+        void set_hex_pass(bool pas_in_hex){this->pas_in_hex=pas_in_hex;}
+        // тип доступа
+        void set_admin(bool admin){this->admin=admin;}
+        // пользовательский адрес счетчика
+        void set_useraddr(uint8_t addr){this->addr=addr;}
+        // период опроса
+        void set_update_interval(uint32_t update_interval){this->update_interval_=update_interval;}
 
         void setup() override {
              
-            this->update_interval_=1000;
+            if (this->update_interval_<5000){
+                this->update_interval_=30000;
+            }
             
             // СВЕТОДИОД, синий встроенный, показывает активность на шине обмена
             if(this->led_active_pin!=nullptr){
@@ -298,9 +340,8 @@ class Mercury : public Sensor, public PollingComponent  {
             // включение отладки (TODO: увязать с флагом отладки)
             debugIn=true;  // будем печатать входящие
             debugOut=true; //  и исходящие пакеты
-            
             // инициализация, адрес устройства 0 - поиск адреса
-            setupMerc(0,minUpdatePeriod); // 
+            setupMerc(minUpdatePeriod); // 
         }
 
         void loop() override {
@@ -344,15 +385,16 @@ class Mercury : public Sensor, public PollingComponent  {
         void update() override {
 
             // автокоррекция периода опроса
-            static uint32_t upd_period = this->update_interval_-1;
-            if(this->update_interval_ != upd_period){
-                upd_period = this->update_interval_;
+            static uint32_t upd_int = this->update_interval_; 
+            static uint32_t upd_period = upd_int-1;
+            if(upd_int != upd_period){
+                upd_period = upd_int;
                 if(upd_period < minUpdatePeriod){
                     upd_period = minUpdatePeriod;   
                 }
                 this->setUpdatePeriod(upd_period);
                 this->_debugMsg(F("Core scan period %u"), ESPHOME_LOG_LEVEL_ERROR, __LINE__, upd_period);               
-                upd_period = this->update_interval_;
+                upd_period = upd_int;
             }
                     
             // контролируем ошибки связи и момент их возникновения

@@ -41,6 +41,9 @@ from esphome.const import (
     UNIT_KILOWATT_HOURS,
     STATE_CLASS_TOTAL_INCREASING,
     DEVICE_CLASS_ENERGY,
+    CONF_USE_ADDRESS,
+    CONF_PASSWORD,
+    CONF_UPDATE_INTERVAL,
 )
 
 #_LOGGER = logging.getLogger(__name__)
@@ -61,11 +64,16 @@ ICON_DATA_FABRICATE = "mdi:factory"
 ICON_PHASE_ANGLE = "mdi:alpha"
 #ICON_RATIO = "mdi:alpha-r-circle-outline"
 ICON_FREQUENCY = "mdi:sine-wave"
-
+CONF_ADMIN="admin"
+CONF_PASS_HEX="pass_in_hex"
 SUMM = "_summ"
 PhA = "_a"
 PhB = "_b"
 PhC = "_c"
+
+VALID_password_CHARACTERS = (
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+)
 
 Mercury230_ns = cg.esphome_ns.namespace("energy_meter_mercury230")
 Mercury230 = Mercury230_ns.class_("Mercury", sensor.Sensor, cg.Component)
@@ -73,7 +81,34 @@ Mercury230 = Mercury230_ns.class_("Mercury", sensor.Sensor, cg.Component)
 def output_info(config):
     #_LOGGER.info(config)
     return config
-    
+
+def validate_password(value):
+    value = cv.string_strict(value)
+    if not value:
+        return value
+    if len(value) < 6:
+        raise cv.Invalid("Password must be at 6 characters long")
+    if len(value) > 6:
+        raise cv.Invalid("Password must be at 6 characters long")
+    for char in value:
+        if char not in VALID_password_CHARACTERS:
+            raise cv.Invalid(
+                f"Password must only consist of upper/lowercase characters and numbers. The character '{char}' cannot be used"
+            )
+    return value
+
+def validate_update_interval(value):
+    value = cv.positive_time_period_milliseconds(value)
+    if value < cv.time_period("5s"):
+        raise cv.Invalid(
+            "Update interval must be greater than or equal to 5 seconds if set."
+        )
+    if value > cv.time_period("30min"):
+        raise cv.Invalid(
+            "The update interval must be greater than or equal to 30 minutes if set."
+        )
+    return value
+ 
 #шаблон сенсора напряжений
 voltSensor=sensor.sensor_schema(
         state_class=STATE_CLASS_MEASUREMENT,
@@ -86,7 +121,7 @@ voltSensor=sensor.sensor_schema(
 powerSensor=sensor.sensor_schema(
         state_class=STATE_CLASS_MEASUREMENT,
         device_class=DEVICE_CLASS_POWER,
-        unit_of_measurement=UNIT_VOLT,
+        unit_of_measurement=UNIT_WATT,
         #icon=ICON_POWER,
         accuracy_decimals=2,
     )
@@ -156,6 +191,16 @@ initParams = {
      ),
      # нога светодиода индикации связи
      cv.Optional(CONF_ACTIVE_LED_PIN ): pins.gpio_output_pin_schema,
+     # пароль для подключения
+     cv.Optional(CONF_PASSWORD): validate_password,
+     # пароль в HEX 
+     cv.Optional(CONF_PASS_HEX, default=False): cv.boolean, 
+     # тип пароля админский или нет
+     cv.Optional(CONF_ADMIN, default=False): cv.boolean, 
+     # адрес счетчика
+     cv.Optional(CONF_USE_ADDRESS): cv.int_range(min=1, max=240),
+     # update interval
+     cv.Optional(CONF_UPDATE_INTERVAL, default="30sec"): validate_update_interval,
 }
 
 # вольты
@@ -279,10 +324,20 @@ async def to_code(config):
     if (CONF_POWER_FACTOR+PhC) in config:
         sens = await sensor.new_sensor(config[CONF_POWER_FACTOR+PhC])
         cg.add(var.set_RatioC(sens))
-
-
-
-
-
-
+    
+    # пароли
+    if (CONF_PASSWORD ) in config:
+        cg.add(var.set_pass(config[CONF_PASSWORD]))
+    # уровень доступа  
+    if (CONF_ADMIN ) in config:
+        cg.add(var.set_admin(config[CONF_ADMIN]))
+    # пароль в HEX  
+    if (CONF_PASS_HEX ) in config:
+        cg.add(var.set_hex_pass(config[CONF_PASS_HEX]))
+    # адрес счетчика
+    if (CONF_USE_ADDRESS) in config:
+        cg.add(var.set_useraddr(config[CONF_USE_ADDRESS]))
+    # update intrerval
+    if (CONF_UPDATE_INTERVAL) in config:
+        cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL]))
 
