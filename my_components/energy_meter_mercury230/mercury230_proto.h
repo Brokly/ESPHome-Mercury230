@@ -17,8 +17,6 @@
         uint8_t forSendSize = 0; // количество данных в буфере отправки
         uint8_t forSendArrow = 0; // указатель на очередной байт в буфере для отправки 
         _currentSend forSenfType = NONE; // тип пакета в буфере отправки, что ждем от пакета приема
-        uint8_t addr=0; // адрес счетчика
-        bool admin=false; // c каким уровнем доступа работаем
         uint32_t scanPeriod = 0xFFFFFFFF; // период сканирования
         uint32_t timeReadByte=0; //тут время последнего получения байта
         uint32_t timeSendByte=0; //время последней отправки байта
@@ -94,6 +92,42 @@
             }
             return count;
         }
+        
+        // получить пароль из настроек
+        bool getPass(uint8_t* buff){
+            if(act_pass==false){ // нет установленного пароля
+               return false;
+            }
+            // проверка типа пароля
+            if(pas_in_hex){
+               for(uint8_t i=0;i<6;i++){ // пароль не в хексе !!!
+                  if(!((pass[i]>='0' && pass[i]<='9') ||
+                       (pass[i]>='A' && pass[i]<='F') ||
+                       (pass[i]>='a' && pass[i]<='f'))){
+                       pas_in_hex=false;
+                       ESP_LOGE(TAG, "Password is not in HEX format, setting 'pas_in_hex' set to False!");
+                       break;                       
+                  }                         
+               }
+            }
+            if(pas_in_hex){
+               for(uint8_t i=0;i<6;i++){
+                  if(pass[i]>='0' && pass[i]<='9'){
+                     buff[i]=pass[i]-'0';
+                  } else if (pass[i]>='A' && pass[i]<='F'){                      
+                     buff[i]=pass[i]-'A'+10;
+                  } else if (pass[i]>='a' && pass[i]<='f'){   
+                     buff[i]=pass[i]-'a'+10;
+                  }                  
+               }
+            } else {
+               for(uint8_t i=0;i<6;i++){
+                  buff[i]=pass[i];    
+               }
+            }
+            ESP_LOGD("This", "Password for send: %X,%X,%X,%X,%X,%X",buff[0],buff[1],buff[2],buff[3],buff[4],buff[5]);
+            return true;
+        }
 
         // открытие канала связи, безадресная
         void sConnect(){
@@ -104,18 +138,34 @@
             forSenfType = GET_TEST;
             //esp_log_printf_(ESPHOME_LOG_LEVEL_ERROR, "HALLO", __LINE__, "sConnect");   
         }
+        // загрузка пользовательского пароля в буфер
+        void setpass(uint8_t* buff, uint32_t pass){
+            
+            for(uint8_t i=0;i<6;i++){
+               
+            }
+        }
+        
         // запрос доступа, по умолчанию с паролем пользователя
         void sAccess(){
             sBuff->addr = addr;
             sBuff->packType=CONNECT;
             if(admin){
                 sBuff->data[0]=2; // уровень доступа
-                uint8_t pass[]=PASS_2;
-                memcpy(sBuff->data+1, pass, sizeof(pass));
+                if(act_pass){
+                    getPass(sBuff->data+1);
+                } else {
+                   //uint8_t pass[]=PASS_2;
+                   memcpy(sBuff->data+1, PASS_2, sizeof(PASS_2));
+                }
             } else {
                 sBuff->data[0]=1; // уровень доступа
-                uint8_t pass[]=PASS_1;
-                memcpy(sBuff->data+1,pass, sizeof(pass));
+                if(act_pass){
+                    getPass(sBuff->data+1);
+                } else {
+                   //uint8_t pass[]=PASS_1;
+                   memcpy(sBuff->data+1,PASS_1, sizeof(PASS_1));
+                }
             }
             forSendSize = crc16mb(sendBuff, 11);
             forSendArrow = 0;
@@ -279,7 +329,7 @@
             if(debugIn){ // показываем буфер для отладки
                 outDataReady(fromReadArrow, readBuff);
             }
-            if(readBuff[0] == addr || readBuff[0] == 0){ // только если ответ он нашего счетчика
+            if(readBuff[0] == addr || readBuff[0] == 0){ // только если ответ от нашего счетчика
                 uint32_t temp;
                 if(fromReadArrow == 4){ // 4 байта скорее всего это пакет подтверждение
                     lastError=(_replyReason)readBuff[1];
@@ -369,9 +419,7 @@
             }
         }
 
-        void setupMerc(uint8_t _addr, uint32_t _scanPeriod, bool _admin=false){ // установка начальных параметров
-            addr=_addr;
-            admin=_admin;
+        void setupMerc(uint32_t _scanPeriod){ // установка начальных параметров
             scanPeriod = _scanPeriod; // корректировка на время обработки
             scanTimer = millis() - _scanPeriod; // инициализация таймера опроса
         }
@@ -409,7 +457,8 @@
                     while(counter<=10){
                         if      (counter==0){sConnect(); break;} // на нулевом шаге пожимаем руку
                         else if (counter==1){sAccess(); break;}  // далее просим доступ
-                        else if (counter==2 && addr==0){sGetAddr(); counter=11; procError=true; break;} // поиск адреса // пока не найдем дальше не работаем
+                        // поиск адреса только если он нулевой и пока не найдем дальше не работаем
+                        else if (counter==2 && addr==0){sGetAddr(); counter=11; procError=true; break;} 
                         else if (counter==3){sGetVers(); break;}     // далее версию, дату изготовления, серийник
                         else if (counter==4){if(cbValues){sGetValue();  break;}}   // показания
                         else if (counter==5){if(cbPower){sGetPower(); break;}}     // на этом шаге можем считать мощность
@@ -466,7 +515,7 @@
         _replyReason getFromMerc(uint8_t d){
             uint32_t _now=millis();
             if(_now-timeReadByte>ABORT_RECIVE_TIME){ // таймаут получения данных
-                goto reset_buff;  //ошибку не поднимае, нужно только для корректности данных
+                goto reset_buff;  //ошибку не поднимаем, нужно только для корректности данных
             } 
             if(fromReadArrow == sizeof(readBuff)){ // переполнение буфера
                 procError=true;  // поднимаем ошибку для повтора цикла инициализации
