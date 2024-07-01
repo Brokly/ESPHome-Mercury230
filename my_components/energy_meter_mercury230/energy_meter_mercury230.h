@@ -1,6 +1,9 @@
 
 #pragma once
 
+#ifndef ENERGY_METER_MERCURY230_H
+#define ENERGY_METER_MERCURY230_H
+
 #include <Arduino.h>
 #include "esphome.h"
 #include <stdarg.h>
@@ -26,11 +29,11 @@ class Mercury : public Sensor, public PollingComponent  {
     enum _replyReason:uint8_t { REP_OK=0, //Все нормально
                                 ERROR_COMMAND=1, //Недопустимая команда или параметр
                                 ERROR_HARDWARE=2,//Внутренняя ошибка счетчика
-                                ERROR_ACCESS_LEVEL=3,//Недостаточен уровень для удовлетворения запроса
+                                ERROR_ACCESS_LEVEL=3,//Недостаточен уровень доступа для запроса
                                 ERROR_CORE_TIME=4, //Внутренние часы счетчика уже корректировались в течение текущих суток
                                 ERROR_CONNECTION=5, //Не открыт канал связи
                                 ERROR_TIMEOUT=6, //Ошибка ответа, ошибка КС
-                                BUFFER_OVERFLOW=7 // переполнениебуфера
+                                BUFFER_OVERFLOW=7 // переполнение буфера
     };
 
     //типы функций обратного вызова
@@ -212,13 +215,13 @@ class Mercury : public Sensor, public PollingComponent  {
         // вывод в дебаг текущей конфигурации компонента
         void dump_config() {
             ESP_LOGCONFIG(TAG, "Mercury:");
-            ESP_LOGCONFIG(TAG, "UART Bus:");
-            ESP_LOGCONFIG(TAG, "  RX Buffer Size: %u", my_serial->get_rx_buffer_size());
-            ESP_LOGCONFIG(TAG, "  Baud Rate: %u baud", my_serial->get_baud_rate());
-            ESP_LOGCONFIG(TAG, "  Data Bits: %u", my_serial->get_data_bits());
-            ESP_LOGCONFIG(TAG, "  Parity: %s", LOG_STR_ARG(parity_to_str(my_serial->get_parity())));
-            ESP_LOGCONFIG(TAG, "  Stop bits: %u", my_serial->get_stop_bits());
-            ESP_LOGCONFIG(TAG, "  Update interval: %u sec", (this->update_interval_/1000));
+            //ESP_LOGCONFIG(TAG, "UART Bus:");
+            //ESP_LOGCONFIG(TAG, "  RX Buffer Size: %u", my_serial->get_rx_buffer_size());
+            //ESP_LOGCONFIG(TAG, "  Baud Rate: %u baud", my_serial->get_baud_rate());
+            //ESP_LOGCONFIG(TAG, "  Data Bits: %u", my_serial->get_data_bits());
+            //ESP_LOGCONFIG(TAG, "  Parity: %s", LOG_STR_ARG(parity_to_str(my_serial->get_parity())));
+            //ESP_LOGCONFIG(TAG, "  Stop bits: %u", my_serial->get_stop_bits());
+            ESP_LOGCONFIG(TAG, "Update interval: %u sec", (this->update_interval_/1000));
             LOG_SENSOR("", "Voltage phase A ", this->VoltA);
             LOG_SENSOR("", "Voltage phase B ", this->VoltB);
             LOG_SENSOR("", "Voltage phase C ", this->VoltC);
@@ -417,3 +420,5 @@ class Mercury : public Sensor, public PollingComponent  {
 
 } // namespace energy_meter_mercury230
 } // namespace esphome  
+
+#endif //ENERGY_METER_MERCURY230_H

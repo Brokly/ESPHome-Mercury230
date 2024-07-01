@@ -1,3 +1,4 @@
+#pragma once
 #ifndef MERCURY230_PROTO_H
 #define MERCURY230_PROTO_H
 
