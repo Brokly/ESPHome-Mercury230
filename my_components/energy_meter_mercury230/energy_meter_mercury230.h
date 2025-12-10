@@ -4,7 +4,7 @@
 #ifndef ENERGY_METER_MERCURY230_H
 #define ENERGY_METER_MERCURY230_H
 
-#include <Arduino.h>
+//#include <Arduino.h>
 #include "esphome.h"
 #include <stdarg.h>
 #include "esphome/core/log.h"
@@ -160,7 +160,7 @@ class Mercury : public Sensor, public PollingComponent  {
         // line - строка, на которой произошел вызов (удобно при отладке)
         //
         // Своровал, спасибо GrKoR :)
-        void _debugMsg(const String &msg, uint8_t dbgLevel = ESPHOME_LOG_LEVEL_DEBUG, unsigned int line = 0, ... ){
+        void _debugMsg(const std::string &msg, uint8_t dbgLevel = ESPHOME_LOG_LEVEL_DEBUG, unsigned int line = 0, ... ){
             if (dbgLevel < ESPHOME_LOG_LEVEL_NONE) dbgLevel = ESPHOME_LOG_LEVEL_NONE;
             if (dbgLevel > ESPHOME_LOG_LEVEL_VERY_VERBOSE) dbgLevel = ESPHOME_LOG_LEVEL_VERY_VERBOSE;
             if (line == 0) line = __LINE__; // если строка не передана, берем текущую строку
@@ -180,7 +180,7 @@ class Mercury : public Sensor, public PollingComponent  {
         // line - строка, на которой произошел вызов (удобно при отладке)
         //
         void _debugPrintPacket(uint8_t* data, uint8_t size, bool in, uint8_t dbgLevel = ESPHOME_LOG_LEVEL_DEBUG, unsigned int line = 0){
-            String st = "";
+            std::string st = "";
             char textBuf[11];
             // заполняем время получения пакета
             memset(textBuf, 0, 11);
@@ -199,7 +199,7 @@ class Mercury : public Sensor, public PollingComponent  {
                 if(i<size-3){
                    st+=' ';
                 } else if(i==size-3){
-                   st+=F(" ("); 
+                   st+=" ("; 
                 } else if(i==size-1){
                    st+=')'; 
                 }                    
@@ -396,7 +396,7 @@ class Mercury : public Sensor, public PollingComponent  {
                     upd_period = minUpdatePeriod;   
                 }
                 this->setUpdatePeriod(upd_period);
-                this->_debugMsg(F("Core scan period %u"), ESPHOME_LOG_LEVEL_ERROR, __LINE__, upd_period);               
+                this->_debugMsg("Core scan period %u", ESPHOME_LOG_LEVEL_ERROR, __LINE__, upd_period);               
                 upd_period = upd_int;
             }
                     
@@ -408,9 +408,9 @@ class Mercury : public Sensor, public PollingComponent  {
                     this->error_string->publish_state(getStrError(oldError));   
                 }
                 if(oldError==REP_OK){
-                    _debugMsg(F("No errors !"), ESPHOME_LOG_LEVEL_INFO, __LINE__);
+                    _debugMsg("No errors !", ESPHOME_LOG_LEVEL_INFO, __LINE__);
                 } else {
-                    _debugMsg(F("Error: %s"), ESPHOME_LOG_LEVEL_ERROR, __LINE__, getStrError(oldError));
+                    _debugMsg("Error: %s", ESPHOME_LOG_LEVEL_ERROR, __LINE__, getStrError(oldError));
                 }
             }
             
