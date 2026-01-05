@@ -226,8 +226,7 @@ initParams[cv.Optional(CONF_POWER_FACTOR+PhA)] = ratioSensor;
 initParams[cv.Optional(CONF_POWER_FACTOR+PhB)] = ratioSensor;
 initParams[cv.Optional(CONF_POWER_FACTOR+PhC)] = ratioSensor;
 
-#CONFIG_SCHEMA = cv.All(sensor.SENSOR_SCHEMA.extend(initParams).extend(uart.UART_DEVICE_SCHEMA).extend(cv.COMPONENT_SCHEMA), output_info)
-CONFIG_SCHEMA = cv.All(sensor.sensor_schema(Mercury230).extend(initParams).extend(uart.UART_DEVICE_SCHEMA).extend(cv.COMPONENT_SCHEMA), output_info)
+CONFIG_SCHEMA = cv.All(sensor.sensor_schema(sensor.Sensor).extend(initParams).extend(uart.UART_DEVICE_SCHEMA).extend(cv.COMPONENT_SCHEMA), output_info)
 
 async def to_code(config):
     #_LOGGER.info("--------------")
